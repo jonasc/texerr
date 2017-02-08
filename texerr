@@ -1,0 +1,408 @@
+#!/usr/bin/env python3
+"""
+texerr --  LaTeX output parser and formatter
+Copyright (C) 2017  Jonas Cleve (github@bcdf.eu)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""
+import argparse
+import logging
+import os.path
+import re
+import subprocess
+import sys
+from collections import OrderedDict
+from io import TextIOBase
+
+
+def _foreground(s, color):
+    colors = {
+        'black': '\x1b[30m',
+        'blue': '\x1b[34m',
+        'cyan': '\x1b[36m',
+        'green': '\x1b[32m',
+        'magenta': '\x1b[35m',
+        'red': '\x1b[31m',
+        'white': '\x1b[37m',
+        'yellow': '\x1b[33m',
+    }
+    links = {
+        'k': 'black',
+        'b': 'blue',
+        'c': 'cyan',
+        'g': 'green',
+        'm': 'magenta',
+        'r': 'red',
+        'w': 'white',
+        'y': 'yellow',
+    }
+    color = colors.get(color) or colors.get(links.get(color), '')
+    return '{color}{s}'.format(color=color, s=s)
+
+
+def _background(s, color):
+    colors = {
+        'black': '\x1b[40m',
+        'blue': '\x1b[44m',
+        'cyan': '\x1b[46m',
+        'green': '\x1b[42m',
+        'magenta': '\x1b[45m',
+        'red': '\x1b[41m',
+        'white': '\x1b[47m',
+        'yellow': '\x1b[43m',
+    }
+    links = {
+        'k': 'black',
+        'b': 'blue',
+        'c': 'cyan',
+        'g': 'green',
+        'm': 'magenta',
+        'r': 'red',
+        'w': 'white',
+        'y': 'yellow',
+    }
+    color = colors.get(color) or colors.get(links.get(color), '')
+    return '{color}{s}'.format(color=color, s=s)
+
+
+def _bold(s):
+    return '{bold}{s}'.format(bold='\x1b[1m', s=s)
+
+
+def _underline(s):
+    return '{underline}{s}'.format(underline='\x1b[4m', s=s)
+
+
+def _reverse(s):
+    return '{reverse}{s}'.format(reverse='\x1b[7m', s=s)
+
+
+def _reset(s):
+    return '{s}{reset}'.format(s=s, reset='\x1b[0m')
+
+
+def color(s, foreground=None, background=None, bold=False, underline=False, reverse=False, reset=True,
+          force_reset=False):
+    '''
+    Return the given string, wrapped in the given colour.
+
+    Foreground and background can be one of:
+    black, red, green, yellow, blue, magenta, cyan, white.
+
+    Also resets the colour and other attributes at the end of the string.
+    '''
+    if not s:
+        if force_reset:
+            return _reset('')
+        return s
+    if foreground:
+        s = _foreground(s, foreground)
+    if background:
+        s = _background(s, background)
+    if bold:
+        s = _bold(s)
+    if underline:
+        s = _underline(s)
+    if reverse:
+        s = _reverse(s)
+    if reset:
+        s = _reset(s)
+    return s
+
+
+class TextIOWrapper(TextIOBase):
+    def __init__(self, *streams):
+        self.streams = streams
+        super(TextIOWrapper, self).__init__()
+
+    def close(self, *args, **kwargs):
+        for stream in self.streams:
+            stream.close(*args, **kwargs)
+
+    def flush(self, *args, **kwargs):
+        for stream in self.streams:
+            stream.flush(*args, **kwargs)
+
+    def writelines(self, *args, **kwargs):
+        for stream in self.streams:
+            stream.writelines(*args, **kwargs)
+
+    def write(self, *args, **kwargs):
+        for stream in self.streams:
+            stream.write(*args, **kwargs)
+
+
+class TexLogFilterError(ValueError):
+    pass
+
+
+class TexLogFilter:
+    def __init__(self, in_stream, out_stream):
+        self.in_stream = in_stream
+        self.out_stream = out_stream
+
+        self.file_stack = []
+        self.file_depth = 0
+        self.last_page = 0
+        self.local_file = ''
+
+        self.output_expressions = OrderedDict()
+        self.functions = dict()
+        self.regular_expression = None
+
+        self.add_expression('page', r'\[(?P<page>\d+)(\b[^\]]+)?\]', self.page)
+        self.add_expression('file_new', r'\((?P<file_new>[^\s)]+)\b\)?', self.file_new)
+        self.add_expression('file_close', r'\)', self.file_close)
+        self.add_expression('latex_warning', r'^LaTeX\ Warning:.*$', self.latex_warning)
+        self.add_expression('latex_font_warning', r'^LaTeX\ Font\ Warning:.*$', self.latex_font_warning)
+        self.add_expression('latex_error', r'^!\ LaTeX\ Error:.*$', self.latex_error)
+        self.add_expression('latex_error2', r'^!\ .*$', self.latex_error2)
+        self.add_expression('full_box', r'^(?P<full_box_type>(Ov|Und)erfull).*?(?P<full_box_which>lines\ \S+|active)', self.full_box)
+        self.add_expression('chapter', r'chapter\ (\d+\.|without\ number)', self.ignore)
+
+        self.current_expression_name = None
+        self.current_line = None
+
+        self.context_data = None
+        self.context_name = None
+
+    def open_context(self):
+        self.context_name = self.current_expression_name
+
+    def close_context(self, consumed=False):
+        self.context_name = None
+        self.context_data = None
+        if consumed:
+            self.current_line = ''
+
+    @property
+    def in_context(self):
+        return self.context_name is not None
+
+    def add_expression(self, name, regular_expression, function):
+        if r'(?P<{}>'.format(name) not in regular_expression:
+            regular_expression = r'(?P<{}>{})'.format(name, regular_expression)
+        self.output_expressions[name] = regular_expression
+        self.functions[name] = function
+        self._build_regular_expression()
+
+    def _build_regular_expression(self):
+        self.regular_expression = re.compile(r'(?P<full_match>' + r'|'.join(self.output_expressions.values()) + r')')
+
+    def page(self, match):
+        try:
+            self.last_page = int(match.group('page'))
+        except ValueError:
+            raise TexLogFilterError('"{}" cannot be treated as an integer.'.format(match.group('page')))
+        return True
+
+    def _pop_file(self):
+        try:
+            if self.file_stack.pop():
+                for file_name in reversed(self.file_stack):
+                    if file_name and file_name.startswith('./'):
+                        self.local_file = file_name
+                return True
+            return False
+        except IndexError:
+            logging.warning('Trying to POP from empty file stack -- probably non-perfect parsing.')
+            return False
+
+    def file_new(self, match):
+        file_name = match.group('file_new')
+        result = True
+        if os.path.exists(file_name):
+            self.file_stack.append(file_name)
+            if file_name.startswith('./'):
+                self.local_file = file_name
+        else:
+            self.file_stack.append(None)
+            result = False
+        if match.group('full_match').endswith(')'):
+            self._pop_file()
+
+        return result
+
+    def file_close(self, match):
+        return self._pop_file()
+
+    def ignore(self, match):
+        return True
+
+    def latex_warning(self, match):
+        self._header()
+        self.print(color(match.group('latex_warning'), foreground='magenta', bold=True))
+        self._footer()
+        return True
+
+    def latex_font_warning(self, match):
+        if not self.in_context:
+            self._header()
+            self.print(color(match.group('latex_font_warning'), foreground='cyan', reset=False))
+            self.open_context()
+        else:
+            if not self.current_line.startswith('(Font)'):
+                self.close_context()
+                self.print(color('', force_reset=True), end='')
+                self._footer()
+            else:
+                self.print(self.current_line.rstrip())
+
+        return True
+
+    def latex_error(self, match):
+        if not self.in_context:
+            self._header()
+            self.print(color(match.group('latex_error'), foreground='red', bold=True, background='yellow',
+                             reset=False))
+            self.open_context()
+        else:
+            self.print(self.current_line.rstrip(), end='')
+
+            if self.current_line.startswith('l.'):
+                self.close_context(consumed=True)
+                self.print(color('', force_reset=True))
+                self._footer(end='')
+            self.print()
+        return True
+
+    def latex_error2(self, match):
+        if not self.in_context:
+            self._header()
+            self.print(color(match.group('latex_error2'), foreground='red', bold=True, background='yellow',
+                             reset=False))
+            self.open_context()
+        else:
+            self.print(self.current_line.rstrip(), end='')
+
+            if self.context_data:
+                self.close_context(consumed=True)
+                self.print(color('', force_reset=True))
+                self._footer(end='')
+            elif self.current_line.startswith('l.'):
+                self.context_data = True
+            self.print()
+        return True
+
+    def full_box(self, match):
+        if not self.in_context:
+            self._header()
+            self.print(color(match.group('full_box'), foreground='magenta'))
+            if match.group('full_box_which').startswith('lines'):
+                self.open_context()
+            else:
+                self._footer()
+        else:
+            self.print(color(self.current_line.rstrip(), foreground='magenta'))
+            self.close_context(consumed=True)
+            self._footer()
+        return True
+
+    def _footer(self, **kwargs):
+        self.print('-' * 80, **kwargs)
+
+    def _header(self):
+        self.print('-' * 80)
+        self.print('File {}, page {}:'.format(color(self.local_file, foreground='green'),
+                                              color(self.last_page + 1, foreground='cyan')))
+
+    def print(self, *args, **kwargs):
+        kwargs['file'] = self.out_stream
+        kwargs['flush'] = True
+        print(*args, **kwargs)
+
+    def unmatched(self, text):
+        if text.strip():
+            self.print(color(text.rstrip(), foreground='blue'))
+
+    def filter(self):
+        while True:
+            try:
+                self.current_line = self.in_stream.readline()
+            except UnicodeDecodeError:
+                self.print('UnicodeDecodeError while parsing line from output')
+                continue
+
+            if self.current_line == '':
+                break
+
+            if self.in_context:
+                self.functions[self.context_name](None)
+            if not self.current_line:
+                continue
+            last_match_ended_at = 0
+            for match in self.regular_expression.finditer(self.current_line):
+                for name in self.output_expressions.keys():
+                    if match.group(name):
+                        break
+                else:
+                    logging.warning('Match found, but no group matched: %s', match)
+                    continue
+
+                self.current_expression_name = name
+
+                try:
+                    if self.functions[name](match):
+                        if match.start() > last_match_ended_at:
+                            self.unmatched(self.current_line[last_match_ended_at:match.start()])
+                        last_match_ended_at = match.end()
+                except TexLogFilterError as e:
+                    logging.error('Function for %s threw exception\n%s\non line: %s', e, self.current_line)
+
+            if last_match_ended_at < len(self.current_line) and not self.in_context:
+                self.unmatched(self.current_line[last_match_ended_at:])
+
+
+def build_argparser():
+    parser = argparse.ArgumentParser(
+        description='Run a LaTeX binary and filter the output to only show relevant information.'
+    )
+    parser.add_argument(
+        'latex_cmd',
+        help='Which LaTeX command should be run, pdflatex, xetex, etc.',
+    )
+    parser.add_argument(
+        'latex_options',
+        nargs=argparse.REMAINDER,
+        help='Optional arguments to pass to the LaTeX command.',
+    )
+
+    return parser
+
+
+def main(args):
+    try:
+        process = subprocess.Popen(
+            [args.latex_cmd] + args.latex_options,
+            stderr=subprocess.STDOUT,
+            stdout=subprocess.PIPE,
+            universal_newlines=True,
+        )
+    except FileNotFoundError:
+        print('Program "{latex_cmd}" could not be found.'.format(latex_cmd=args.latex_cmd), file=sys.stderr)
+        return 1
+
+    log_filter = TexLogFilter(in_stream=process.stdout,
+                              out_stream=TextIOWrapper(sys.stdout, open('/tmp/texerr-log', 'w')))
+
+    log_filter.filter()
+    log_filter.out_stream.close()
+
+    process.wait()
+    return process.returncode
+
+
+if __name__ == '__main__':
+    parser = build_argparser()
+    sys.exit(main(parser.parse_args()))
