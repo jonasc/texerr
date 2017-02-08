@@ -26,6 +26,35 @@ from collections import OrderedDict
 from io import TextIOBase
 
 
+__version__ = '0.1.0'
+
+
+class VersionAction(argparse.Action):
+    def __init__(self, *args, version, **kwargs):
+        self.version = version
+        super(VersionAction, self).__init__(*args, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print('{program} {version}'.format(program=parser.prog,
+                                           version=self.version))
+        print('')
+        print('Copyright (C) 2017 Jonas Cleve')
+        print('')
+        print('This program is free software: you can redistribute it and/or modify')
+        print('it under the terms of the GNU General Public License as published by')
+        print('the Free Software Foundation, either version 3 of the License, or')
+        print('(at your option) any later version.')
+        print('')
+        print('This program is distributed in the hope that it will be useful,')
+        print('but WITHOUT ANY WARRANTY; without even the implied warranty of')
+        print('MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the')
+        print('GNU General Public License for more details.')
+        print('')
+        print('You should have received a copy of the GNU General Public License')
+        print('along with this program.  If not, see <http://www.gnu.org/licenses/>.')
+        sys.exit(0)
+
+
 def _foreground(s, color):
     colors = {
         'black': '\x1b[30m',
@@ -367,6 +396,12 @@ class TexLogFilter:
 def build_argparser():
     parser = argparse.ArgumentParser(
         description='Run a LaTeX binary and filter the output to only show relevant information.'
+    )
+    parser.add_argument(
+        '-v',
+        '--version',
+        action=VersionAction,
+        version=__version__,
     )
     parser.add_argument(
         'latex_cmd',
