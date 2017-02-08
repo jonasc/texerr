@@ -1,5 +1,5 @@
 # TeXerr
-LaTeX output parser and formatter
+Run a LaTeX binary and filter the output to only show relevant information.
 
 ## About this program
 
