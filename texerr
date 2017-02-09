@@ -55,82 +55,82 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.''')
         sys.exit(0)
 
 
-def _foreground(s, color):
-    colors = {
-        'black': '\x1b[30m',
-        'blue': '\x1b[34m',
-        'cyan': '\x1b[36m',
-        'green': '\x1b[32m',
-        'magenta': '\x1b[35m',
-        'red': '\x1b[31m',
-        'white': '\x1b[37m',
-        'yellow': '\x1b[33m',
-    }
-    links = {
-        'k': 'black',
-        'b': 'blue',
-        'c': 'cyan',
-        'g': 'green',
-        'm': 'magenta',
-        'r': 'red',
-        'w': 'white',
-        'y': 'yellow',
-    }
-    color = colors.get(color) or colors.get(links.get(color), '')
-    return '{color}{s}'.format(color=color, s=s)
-
-
-def _background(s, color):
-    colors = {
-        'black': '\x1b[40m',
-        'blue': '\x1b[44m',
-        'cyan': '\x1b[46m',
-        'green': '\x1b[42m',
-        'magenta': '\x1b[45m',
-        'red': '\x1b[41m',
-        'white': '\x1b[47m',
-        'yellow': '\x1b[43m',
-    }
-    links = {
-        'k': 'black',
-        'b': 'blue',
-        'c': 'cyan',
-        'g': 'green',
-        'm': 'magenta',
-        'r': 'red',
-        'w': 'white',
-        'y': 'yellow',
-    }
-    color = colors.get(color) or colors.get(links.get(color), '')
-    return '{color}{s}'.format(color=color, s=s)
-
-
-def _bold(s):
-    return '{bold}{s}'.format(bold='\x1b[1m', s=s)
-
-
-def _underline(s):
-    return '{underline}{s}'.format(underline='\x1b[4m', s=s)
-
-
-def _reverse(s):
-    return '{reverse}{s}'.format(reverse='\x1b[7m', s=s)
-
-
-def _reset(s):
-    return '{s}{reset}'.format(s=s, reset='\x1b[0m')
-
-
-def color(s, foreground=None, background=None, bold=False, underline=False, reverse=False, reset=True,
-          force_reset=False):
-    '''
-    Return the given string, wrapped in the given colour.
+def color(s, foreground=None, background=None, bold=False, underline=False,
+          reverse=False, reset=True, force_reset=False):
+    """
+    Return the given string, wrapped in the given color.
 
     Foreground and background can be one of:
     black, red, green, yellow, blue, magenta, cyan, white.
 
-    Also resets the colour and other attributes at the end of the string.
-    '''
+    Also resets the color and other attributes at the end of the string.
+    """
+    def _foreground(s, color):
+        """Format given string in given foreground color."""
+        colors = {
+            'black': '\x1b[30m',
+            'blue': '\x1b[34m',
+            'cyan': '\x1b[36m',
+            'green': '\x1b[32m',
+            'magenta': '\x1b[35m',
+            'red': '\x1b[31m',
+            'white': '\x1b[37m',
+            'yellow': '\x1b[33m',
+        }
+        links = {
+            'k': 'black',
+            'b': 'blue',
+            'c': 'cyan',
+            'g': 'green',
+            'm': 'magenta',
+            'r': 'red',
+            'w': 'white',
+            'y': 'yellow',
+        }
+        color = colors.get(color) or colors.get(links.get(color), '')
+        return '{color}{s}'.format(color=color, s=s)
+
+    def _background(s, color):
+        """Format given string in given background color."""
+        colors = {
+            'black': '\x1b[40m',
+            'blue': '\x1b[44m',
+            'cyan': '\x1b[46m',
+            'green': '\x1b[42m',
+            'magenta': '\x1b[45m',
+            'red': '\x1b[41m',
+            'white': '\x1b[47m',
+            'yellow': '\x1b[43m',
+        }
+        links = {
+            'k': 'black',
+            'b': 'blue',
+            'c': 'cyan',
+            'g': 'green',
+            'm': 'magenta',
+            'r': 'red',
+            'w': 'white',
+            'y': 'yellow',
+        }
+        color = colors.get(color) or colors.get(links.get(color), '')
+        return '{color}{s}'.format(color=color, s=s)
+
+    def _bold(s):
+        """Format given string with bold font."""
+        return '{bold}{s}'.format(bold='\x1b[1m', s=s)
+
+    def _underline(s):
+        """Format given string with underlined font."""
+        return '{underline}{s}'.format(underline='\x1b[4m', s=s)
+
+    def _reverse(s):
+        """Format given string with reversed font."""
+        return '{reverse}{s}'.format(reverse='\x1b[7m', s=s)
+
+    def _reset(s):
+        """Reset all formatting attributes after the given string."""
+        return '{s}{reset}'.format(s=s, reset='\x1b[0m')
+
     if not s:
         if force_reset:
             return _reset('')
