@@ -29,6 +29,9 @@ from io import TextIOBase
 __version__ = '0.1.0'
 
 
+###############################################################################
+# Argument Parser
+###############################################################################
 class VersionAction(argparse.Action):
     def __init__(self, *args, version, **kwargs):
         self.version = version
@@ -55,6 +58,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.''')
         sys.exit(0)
 
 
+###############################################################################
+# Colors
+###############################################################################
 def color(s, foreground=None, background=None, bold=False, underline=False,
           reverse=False, reset=True, force_reset=False):
     """
@@ -150,24 +156,34 @@ def color(s, foreground=None, background=None, bold=False, underline=False,
     return s
 
 
-class TextIOWrapper(TextIOBase):
+###############################################################################
+# Wrapper to write output simultaneously to multiple file-like objects.
+###############################################################################
+class TextMultipleOutputWrapper(TextIOBase):
+    """Wrapper to write output simultaneously to multiple file-like objects."""
+
     def __init__(self, *streams):
+        """Store all given arguments as streams."""
         self.streams = streams
-        super(TextIOWrapper, self).__init__()
+        super(TextMultipleOutputWrapper, self).__init__()
 
     def close(self, *args, **kwargs):
+        """Close all streams."""
         for stream in self.streams:
             stream.close(*args, **kwargs)
 
     def flush(self, *args, **kwargs):
+        """Flush all streams."""
         for stream in self.streams:
             stream.flush(*args, **kwargs)
 
     def writelines(self, *args, **kwargs):
+        """Write multiple lines to all streams."""
         for stream in self.streams:
             stream.writelines(*args, **kwargs)
 
     def write(self, *args, **kwargs):
+        """Write to all streams."""
         for stream in self.streams:
             stream.write(*args, **kwargs)
 
@@ -429,7 +445,7 @@ def main(args):
         return 1
 
     log_filter = TexLogFilter(in_stream=process.stdout,
-                              out_stream=TextIOWrapper(sys.stdout, open('/tmp/texerr-log', 'w')))
+                              out_stream=TextMultipleOutputWrapper(sys.stdout, open('/tmp/texerr-log', 'w')))
 
     log_filter.filter()
     log_filter.out_stream.close()
