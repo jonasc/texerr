@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-texerr --  LaTeX output parser and formatter
+texerr -- Run a LaTeX binary and filter output for relevant information.
 Copyright (C) 2017  Jonas Cleve (github@bcdf.eu)
 
 This program is free software: you can redistribute it and/or modify
@@ -395,7 +395,7 @@ class TexLogFilter:
 
 def build_argparser():
     parser = argparse.ArgumentParser(
-        description='Run a LaTeX binary and filter the output to only show relevant information.'
+        description='Run a LaTeX binary and filter output for relevant information.'
     )
     parser.add_argument(
         '-v',

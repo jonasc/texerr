@@ -1,5 +1,5 @@
 # TeXerr
-Run a LaTeX binary and filter the output to only show relevant information.
+Run a LaTeX binary and filter output for relevant information.
 
 ## About this program
 
